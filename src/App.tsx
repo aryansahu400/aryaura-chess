@@ -12,7 +12,8 @@ import {
   Info,
   Loader2,
   History,
-  Lightbulb
+  Lightbulb,
+  FlipVertical2
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -28,6 +29,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [boardWidth, setBoardWidth] = useState(560);
   const [cooldown, setCooldown] = useState(0);
+  const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
 
   // Cooldown timer
   useEffect(() => {
@@ -158,6 +160,14 @@ export default function App() {
           </div>
           <div className="flex items-center gap-4">
             <button 
+              onClick={() => setBoardOrientation(o => o === "white" ? "black" : "white")}
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#262421] hover:bg-[#2d2b28] transition-colors text-sm font-medium border border-[#3c3a37]"
+              title="Flip board"
+            >
+              <FlipVertical2 className="w-4 h-4" />
+              {boardOrientation === "white" ? "Play as Black" : "Play as White"}
+            </button>
+            <button 
               onClick={resetGame}
               className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#262421] hover:bg-[#2d2b28] transition-colors text-sm font-medium border border-[#3c3a37]"
             >
@@ -206,6 +216,7 @@ export default function App() {
                   position: game.fen(),
                   onPieceDrop: onDrop,
                   boardStyle: { width: boardWidth },
+                  boardOrientation: boardOrientation,
                   darkSquareStyle: { backgroundColor: "#779556" },
                   lightSquareStyle: { backgroundColor: "#ebecd0" }
                 }}
