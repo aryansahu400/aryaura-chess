@@ -1,0 +1,5 @@
+{
+  "name": "Aryaura AI",
+  "description": "A professional-grade chess analysis platform powered by Lichess Cloud Eval and Stockfish engine",
+  "requestFramePermissions": []
+}
