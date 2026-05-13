@@ -25,6 +25,7 @@ export default function App() {
     explanation: string;
     evaluation: number;
   } | null>(null);
+  const [currentEvaluation, setCurrentEvaluation] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boardWidth, setBoardWidth] = useState(560);
@@ -46,6 +47,18 @@ export default function App() {
     return Math.max(5, Math.min(95, percentage)); // Keep a small sliver visible
   };
 
+  const updateEvaluation = async (fen: string) => {
+    try {
+      const response = await axios.post("/api/suggest-move", {
+        fen: fen,
+      });
+      setCurrentEvaluation(response.data.evaluation);
+    } catch (err: any) {
+      // Silently fail for background evaluation fetches
+      console.log("Failed to fetch evaluation");
+    }
+  };
+
   // Responsive board width
   useEffect(() => {
     const handleResize = () => {
@@ -61,8 +74,11 @@ export default function App() {
     try {
       const result = game.move(move);
       if (result) {
-        setGame(new Chess(game.fen()));
+        const newGame = new Chess(game.fen());
+        setGame(newGame);
         setMoveHistory(prev => [...prev, result.san]);
+        // Fetch evaluation of the new position
+        updateEvaluation(newGame.fen());
         return true;
       }
     } catch (e) {
@@ -90,6 +106,7 @@ export default function App() {
       });
       const data = response.data;
       setSuggestion(data);
+      setCurrentEvaluation(data.evaluation);
 
       // Automatically make the move
       if (data.move) {
@@ -135,14 +152,25 @@ export default function App() {
     setGame(new Chess());
     setMoveHistory([]);
     setSuggestion(null);
+    setCurrentEvaluation(null);
     setError(null);
   };
 
   const undoMove = () => {
-    game.undo();
-    setGame(new Chess(game.fen()));
-    setMoveHistory(prev => prev.slice(0, -1));
+    if (moveHistory.length === 0) return;
+    
+    // Reconstruct the game by replaying all moves except the last one
+    const newGame = new Chess();
+    const newMoveHistory = moveHistory.slice(0, -1);
+    
+    for (const move of newMoveHistory) {
+      newGame.move(move, { sloppy: true });
+    }
+    
+    setGame(newGame);
+    setMoveHistory(newMoveHistory);
     setSuggestion(null);
+    updateEvaluation(newGame.fen());
   };
 
   return (
@@ -189,7 +217,7 @@ export default function App() {
             >
               <motion.div 
                 initial={{ height: "50%" }}
-                animate={{ height: `${getEvalPercentage(suggestion?.evaluation)}%` }}
+                animate={{ height: `${getEvalPercentage(currentEvaluation)}%` }}
                 transition={{ type: "spring", stiffness: 50, damping: 15 }}
                 className="bg-[#ebecd0] w-full"
               />
@@ -197,15 +225,15 @@ export default function App() {
                 <span>B</span>
                 <span>W</span>
               </div>
-              {suggestion && typeof suggestion.evaluation === 'number' && (
+              {currentEvaluation !== null && (
                 <div 
                   className="absolute left-0 right-0 text-center text-[10px] font-bold z-10 pointer-events-none mix-blend-difference text-white"
                   style={{ 
-                    bottom: `${getEvalPercentage(suggestion.evaluation)}%`,
+                    bottom: `${getEvalPercentage(currentEvaluation)}%`,
                     transform: 'translateY(50%)'
                   }}
                 >
-                  {Math.abs(suggestion.evaluation) > 10 ? (suggestion.evaluation > 0 ? 'M' : '-M') : suggestion.evaluation.toFixed(1)}
+                  {Math.abs(currentEvaluation) > 10 ? (currentEvaluation > 0 ? 'M' : '-M') : currentEvaluation.toFixed(1)}
                 </div>
               )}
             </div>
