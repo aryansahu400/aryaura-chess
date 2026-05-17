@@ -337,6 +337,29 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6 lg:p-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <div className="lg:col-span-12">
+          <div className="bg-[#1e1d1a] rounded-xl border border-[#262421] px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-[#81b64c]" />
+              <h2 className="text-sm font-bold uppercase tracking-wider text-white">Move History</h2>
+            </div>
+            <div className="flex-1 min-w-0 overflow-x-auto">
+              <div className="flex gap-2 text-sm text-[#bababa] whitespace-nowrap">
+                {moveHistory.length === 0 ? (
+                  <span className="italic text-[#666]">No moves yet</span>
+                ) : (
+                  moveHistory.map((move, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-[#262421] border border-[#3c3a37]">
+                      <span className="font-mono text-[#81b64c]">{Math.floor(idx / 2) + 1}{idx % 2 === 0 ? "." : "..."}</span>
+                      <span>{move}</span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Left Column: Board */}
         <div className="lg:col-span-7 flex flex-col items-center">
           <div className="flex gap-3 items-stretch">
@@ -444,29 +467,6 @@ export default function App() {
 
         {/* Right Column: Info & Analysis */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Move History */}
-          <div className="bg-[#1e1d1a] rounded-xl border border-[#262421] overflow-hidden flex flex-col h-[200px]">
-            <div className="px-4 py-3 border-b border-[#262421] bg-[#262421]/50 flex items-center gap-2">
-              <History className="w-4 h-4 text-[#81b64c]" />
-              <h3 className="text-sm font-bold uppercase tracking-wider text-white">Move History</h3>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1 grid grid-cols-4 gap-2 content-start">
-              {moveHistory.length === 0 && (
-                <p className="col-span-4 text-center text-[#666] italic text-sm py-4">No moves yet</p>
-              )}
-              {Array.from({ length: Math.ceil(moveHistory.length / 2) }).map((_, i) => (
-                <React.Fragment key={`row-${i}`}>
-                  <div className="text-[#666] text-xs font-mono flex items-center justify-center">{i + 1}.</div>
-                  <div className="bg-[#262421] px-2 py-1 rounded text-sm text-center border border-[#3c3a37]">{moveHistory[i * 2]}</div>
-                  <div className="bg-[#262421] px-2 py-1 rounded text-sm text-center border border-[#3c3a37]">
-                    {moveHistory[i * 2 + 1] || ""}
-                  </div>
-                  <div />
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
           {/* AI Suggestion Area */}
           <div className="bg-[#1e1d1a] rounded-xl border border-[#262421] overflow-hidden min-h-[300px] flex flex-col">
             <div className="px-4 py-3 border-b border-[#262421] bg-[#262421]/50 flex items-center justify-between">
