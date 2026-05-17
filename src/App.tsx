@@ -26,6 +26,22 @@ export default function App() {
     evaluation: number;
   } | null>(null);
   const [currentEvaluation, setCurrentEvaluation] = useState<number | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<{
+    rating: number;
+    opening: string;
+    good: string[];
+    bad: string[];
+    description: string;
+    changed: string;
+  } | null>(null);
+  const [analysisStreamText, setAnalysisStreamText] = useState("");
+  const [analysisContext, setAnalysisContext] = useState<{
+    fenBefore: string;
+    fenAfter: string;
+    move: string;
+    sanMove: string;
+  } | null>(null);
+  const [analyzingMove, setAnalyzingMove] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boardWidth, setBoardWidth] = useState(560);
@@ -49,13 +65,98 @@ export default function App() {
 
   const updateEvaluation = async (fen: string) => {
     try {
-      const response = await axios.post("/api/suggest-move", {
-        fen: fen,
+      const response = await axios.post("/suggest-move", {
+        fen,
       });
       setCurrentEvaluation(response.data.evaluation);
     } catch (err: any) {
       // Silently fail for background evaluation fetches
       console.log("Failed to fetch evaluation");
+    }
+  };
+
+  const analyzeMoveWithGPT = async (fenBefore: string, fenAfter: string, move: string, sanMove: string) => {
+    setAnalyzingMove(true);
+    setAnalysisResult(null);
+    setAnalysisStreamText("");
+    try {
+      const response = await fetch("/analyse-move", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fenBefore, fenAfter }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Backend error: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Streaming response not supported");
+      }
+
+      const decoder = new TextDecoder();
+      let partial = "";
+      let accumulated = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        partial += decoder.decode(value, { stream: true });
+
+        const events = partial.split("\n\n");
+        partial = events.pop() || "";
+
+        for (const event of events) {
+          if (!event.trim()) continue;
+          const dataLines = event
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.replace(/^data:\s*/, ""));
+
+          const chunkText = dataLines.length ? dataLines.join("") : event;
+          if (chunkText.trim()) {
+            accumulated += chunkText;
+            setAnalysisStreamText(accumulated);
+          }
+        }
+      }
+
+      if (partial.trim()) {
+        const dataLines = partial
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.replace(/^data:\s*/, ""));
+        const chunkText = dataLines.length ? dataLines.join("") : partial;
+        if (chunkText.trim()) {
+          accumulated += chunkText;
+          setAnalysisStreamText(accumulated);
+        }
+      }
+
+      setAnalysisStreamText(accumulated || "No analysis was returned.");
+
+      try {
+        const parsed = JSON.parse(accumulated);
+        setAnalysisResult({
+          rating: Number(parsed.rating ?? 0),
+          opening: typeof parsed.opening === "string" && parsed.opening.trim() !== "" ? parsed.opening : "Unknown Opening",
+          good: Array.isArray(parsed.good) ? parsed.good.slice(0, 3).map(String) : [],
+          bad: Array.isArray(parsed.bad) ? parsed.bad.slice(0, 3).map(String) : [],
+          description: String(parsed.description ?? ""),
+          changed: String(parsed.changed ?? ""),
+        });
+      } catch (parseError) {
+        console.error("Failed to parse analysis JSON:", parseError);
+        setError("Received invalid analysis JSON from the backend.");
+      }
+    } catch (err: any) {
+      console.error("Failed to analyze move:", err.message);
+      setError(err.message || "Failed to analyze move.");
+    } finally {
+      setAnalyzingMove(false);
     }
   };
 
@@ -72,11 +173,20 @@ export default function App() {
 
   function makeAMove(move: any) {
     try {
+      const fenBefore = game.fen();
       const result = game.move(move);
       if (result) {
         const newGame = new Chess(game.fen());
+        const uciMove = move.from + move.to + (move.promotion || "");
         setGame(newGame);
         setMoveHistory(prev => [...prev, result.san]);
+        setAnalysisContext({
+          fenBefore,
+          fenAfter: newGame.fen(),
+          move: uciMove,
+          sanMove: result.san,
+        });
+        setAnalysisStreamText("");
         // Fetch evaluation of the new position
         updateEvaluation(newGame.fen());
         return true;
@@ -101,7 +211,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const response = await axios.post("/api/suggest-move", {
+      const response = await axios.post("/suggest-move", {
         fen: game.fen(),
       });
       const data = response.data;
@@ -135,10 +245,10 @@ export default function App() {
     } catch (err: any) {
       const errorData = err.response?.data;
       if (err.response?.status === 429) {
-        setError(errorData?.details || "Lichess rate limit reached. Please wait a moment.");
+        setError(errorData?.details || "Rate limit reached. Please wait a moment.");
         setCooldown(10); // 10 second cooldown on 429
       } else if (err.response?.status === 404) {
-        setError(errorData?.details || "This position hasn't been analyzed by Lichess yet.");
+        setError(errorData?.details || "Move suggestion unavailable for this position.");
       } else {
         setError(errorData?.error || errorData?.details || err.message || "Failed to get suggestion");
       }
@@ -148,11 +258,28 @@ export default function App() {
     }
   };
 
+  const analyzeLastMove = async () => {
+    if (!analysisContext) {
+      setError("Make a move first, then click Analyze Move.");
+      return;
+    }
+    setError(null);
+    await analyzeMoveWithGPT(
+      analysisContext.fenBefore,
+      analysisContext.fenAfter,
+      analysisContext.move,
+      analysisContext.sanMove,
+    );
+  };
+
   const resetGame = () => {
     setGame(new Chess());
     setMoveHistory([]);
     setSuggestion(null);
     setCurrentEvaluation(null);
+    setAnalysisContext(null);
+    setAnalysisResult(null);
+    setAnalysisStreamText("");
     setError(null);
   };
 
@@ -170,6 +297,9 @@ export default function App() {
     setGame(newGame);
     setMoveHistory(newMoveHistory);
     setSuggestion(null);
+    setAnalysisContext(null);
+    setAnalysisResult(null);
+    setAnalysisStreamText("");
     updateEvaluation(newGame.fen());
   };
 
@@ -288,14 +418,26 @@ export default function App() {
             <button 
               onClick={getSuggestion}
               disabled={loading || game.isGameOver() || cooldown > 0}
-              className="flex-[2] py-3 bg-[#81b64c] hover:bg-[#95c264] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#81b64c]/10"
+              className="flex-1 py-3 bg-[#81b64c] hover:bg-[#95c264] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#81b64c]/10"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <Brain className="w-5 h-5" />
               )}
-              {loading ? "Analyzing..." : cooldown > 0 ? `Wait ${cooldown}s` : "AI Move"}
+              {loading ? "Finding best move..." : cooldown > 0 ? `Wait ${cooldown}s` : "Suggest Move"}
+            </button>
+            <button 
+              onClick={analyzeLastMove}
+              disabled={analyzingMove || !analysisContext || game.isGameOver()}
+              className="flex-1 py-3 bg-[#1f4a73] hover:bg-[#2d628f] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all flex items-center justify-center gap-2 border border-[#3b5e8e]"
+            >
+              {analyzingMove ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Lightbulb className="w-5 h-5" />
+              )}
+              {analyzingMove ? "Analyzing..." : "Analyze Move"}
             </button>
           </div>
         </div>
@@ -334,9 +476,9 @@ export default function App() {
               </div>
             </div>
             
-            <div className="p-6 flex-1 relative">
+            <div className="p-6 flex-1 relative overflow-y-auto">
               <AnimatePresence mode="wait">
-                {!suggestion && !loading && !error && (
+                {!analysisStreamText && !suggestion && !loading && !error && !analyzingMove && (
                   <motion.div 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -347,13 +489,13 @@ export default function App() {
                       <Brain className="w-8 h-8 text-[#4a4a4a]" />
                     </div>
                     <div>
-                      <p className="text-white font-medium">Need a hint?</p>
-                      <p className="text-sm text-[#666]">Click the AI Move button to let the engine play the best move for you.</p>
+                      <p className="text-white font-medium">Ready for move analysis</p>
+                      <p className="text-sm text-[#666]">Make a move first, then click Analyze Move to stream the AI report.</p>
                     </div>
                   </motion.div>
                 )}
 
-                {loading && (
+                {(loading || analyzingMove) && (
                   <motion.div 
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -361,7 +503,16 @@ export default function App() {
                     className="h-full flex flex-col items-center justify-center text-center space-y-4 py-10"
                   >
                     <Loader2 className="w-12 h-12 text-[#81b64c] animate-spin" />
-                    <p className="text-sm text-[#bababa]">Querying Lichess Cloud Eval...</p>
+                    <div className="max-w-lg px-4">
+                      <p className="text-sm text-[#bababa]">
+                        {loading ? "Finding the best move..." : "Streaming analysis from the AI backend..."}
+                      </p>
+                      {analysisStreamText && (
+                        <div className="mt-4 rounded-xl bg-[#1a1b1e] border border-[#333a45] p-4 text-left text-sm text-[#d7d7d7] shadow-inner">
+                          <pre className="whitespace-pre-wrap break-words">{analysisStreamText}</pre>
+                        </div>
+                      )}
+                    </div>
                   </motion.div>
                 )}
 
@@ -376,7 +527,56 @@ export default function App() {
                   </motion.div>
                 )}
 
-                {suggestion && !loading && (
+                {analysisResult && !analyzingMove && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                  >
+                    <div className="flex items-center justify-between gap-4 bg-[#262421]/50 p-4 rounded-lg">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-[#81b64c]">Opening</p>
+                        <p className="text-lg font-bold text-white">{analysisResult.opening}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs uppercase tracking-widest text-[#81b64c]">Rating</p>
+                        <p className="text-3xl font-bold text-white">{analysisResult.rating.toFixed(1)}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="bg-[#1a1b1e] border border-[#333a45] rounded-xl p-4">
+                        <p className="text-xs uppercase tracking-widest text-[#81b64c] mb-3">What went well</p>
+                        <ul className="space-y-2 text-sm text-[#d7d7d7] list-disc list-inside">
+                          {analysisResult.good.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="bg-[#1a1b1e] border border-[#333a45] rounded-xl p-4">
+                        <p className="text-xs uppercase tracking-widest text-[#ffb547] mb-3">What to watch</p>
+                        <ul className="space-y-2 text-sm text-[#d7d7d7] list-disc list-inside">
+                          {analysisResult.bad.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#262421]/50 border border-[#333a45] rounded-xl p-4 space-y-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-[#81b64c] mb-2">Strategic summary</p>
+                        <p className="text-sm text-[#bababa]">{analysisResult.description}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-[#81b64c] mb-2">Board change</p>
+                        <p className="text-sm text-[#bababa]">{analysisResult.changed}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {!analysisResult && !analysisStreamText && suggestion && !loading && !analyzingMove && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -402,7 +602,7 @@ export default function App() {
       {/* Footer */}
       <footer className="mt-auto py-8 px-6 border-t border-[#262421] text-center">
         <p className="text-xs text-[#666]">
-          Powered by Lichess Cloud Evaluation Database
+          Powered by the Spring Boot chess analysis backend
         </p>
       </footer>
     </div>
