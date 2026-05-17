@@ -30,6 +30,10 @@ export default defineConfig(({mode}) => {
         '/suggest-move': {
           target: 'http://localhost:8080',
           changeOrigin: true,
+        },
+        '/chat': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
         }
       }
     },

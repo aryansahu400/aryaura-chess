@@ -13,9 +13,11 @@ import {
   Loader2,
   History,
   Lightbulb,
-  FlipVertical2
+  FlipVertical2,
+  MessageSquare
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { ChatDrawer } from "./components/ChatDrawer";
 
 export default function App() {
   const [game, setGame] = useState(new Chess());
@@ -47,6 +49,7 @@ export default function App() {
   const [boardWidth, setBoardWidth] = useState(560);
   const [cooldown, setCooldown] = useState(0);
   const [boardOrientation, setBoardOrientation] = useState<"white" | "black">("white");
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Cooldown timer
   useEffect(() => {
@@ -317,6 +320,14 @@ export default function App() {
             </h1>
           </div>
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsChatOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#4a4a4a] hover:bg-[#5a5a5a] transition-colors text-sm font-medium border border-[#3c3a37] text-amber-400"
+              title="Open chat assistant"
+            >
+              <MessageSquare className="w-4 h-4" />
+              Chat
+            </button>
             <button 
               onClick={() => setBoardOrientation(o => o === "white" ? "black" : "white")}
               className="flex items-center gap-2 px-4 py-2 rounded-md bg-[#262421] hover:bg-[#2d2b28] transition-colors text-sm font-medium border border-[#3c3a37]"
@@ -605,6 +616,13 @@ export default function App() {
           Powered by the Spring Boot chess analysis backend
         </p>
       </footer>
+
+      {/* Chat Drawer */}
+      <ChatDrawer 
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        currentFen={game.fen()}
+      />
     </div>
   );
 }
